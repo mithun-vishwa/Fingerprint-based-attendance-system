@@ -1,0 +1,519 @@
+#include "Adafruit_Fingerprint.h" //fingerprint library header file
+#include<LiquidCrystal.h> //lcd header file
+LiquidCrystal lcd(8,9,10,11,12,13);
+#include <SoftwareSerial.h>
+SoftwareSerial fingerPrint(2, 3); //for tx/rx communication between arduino & r305 fingerprint sensor
+#include <Wire.h>
+#include "RTClib.h" //library file for DS3231 RTC Module
+RTC_DS3231 rtc;
+uint8_t id;
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerPrint);
+#define register_back 14
+#define delete_ok 15
+#define forward 16
+#define reverse 17
+#define match 5
+#define indFinger 7
+#define buzzer 5
+#define records 40 // 40 for 40 user
+int user1[50];
+DateTime now;
+void setup()
+{
+delay(500);
+analogWrite(6,100);
+lcd.begin(16,2);
+Serial.begin(9600);
+pinMode(register_back, INPUT_PULLUP);
+pinMode(forward, INPUT_PULLUP);
+pinMode(reverse, INPUT_PULLUP);
+pinMode(delete_ok, INPUT_PULLUP);
+pinMode(match, INPUT_PULLUP);
+pinMode(buzzer, OUTPUT);
+pinMode(indFinger, OUTPUT);
+digitalWrite(buzzer, LOW);
+lcd.clear();
+lcd.print(" Fingerprint ");
+lcd.setCursor(0,1);
+lcd.print("Attendance System");
+delay(500);
+lcd.clear();
+finger.begin(57600);
+lcd.clear();
+lcd.print("Finding Module..");
+lcd.setCursor(0,1);
+delay(500);
+if (finger.verifyPassword())
+{
+lcd.clear();
+lcd.print(" Module Found");
+delay(500);
+}
+else
+{
+Serial.println("Did not find fingerprint sensor :,");
+lcd.clear();
+lcd.print("Module Not Found");
+lcd.setCursor(0,1);
+lcd.print("Check Connections");
+while (1);
+}
+
+if (! rtc.begin())
+Serial.println("Couldn't find RTC,");
+if (rtc.lostPower())
+{
+Serial.println("RTC is NOT running!,");// This line sets the RTC with an explicit date & time, for example to set
+// June 7, 2018 at 11am you would call:
+// rtc.adjust(DateTime(2018, 6, 7, 11, 0, 0));
+// following line sets the RTC to the date & time this sketch was compiled
+rtc.adjust(DateTime(2018, 11, 21, 13, 17, 0));
+}
+lcd.setCursor(0,0);
+lcd.print(" Press Match to ");
+lcd.setCursor(0,1);
+lcd.print(" Start System");
+delay(1000);
+lcd.clear();
+digitalWrite(indFinger, HIGH);
+}
+
+void loop()
+{
+now = rtc.now();
+lcd.setCursor(0,0);
+lcd.print("Time: ");
+lcd.print(now.hour(), DEC);
+lcd.print(':');
+lcd.print(now.minute(), DEC);
+lcd.print(':');
+lcd.print(now.second(), DEC);
+lcd.print(" ");
+lcd.setCursor(0,1);
+lcd.print("Date: ");
+lcd.print(now.day(), DEC);
+lcd.print('/');
+lcd.print(now.month(), DEC);
+lcd.print('/');
+lcd.print(now.year(), DEC);
+lcd.print(" ");
+delay(500);
+int result=getFingerprintIDez();
+if(result>0)
+{
+digitalWrite(indFinger, LOW);
+digitalWrite(buzzer, HIGH);
+delay(100);
+digitalWrite(buzzer, LOW);
+lcd.clear();
+lcd.print("ID:");
+lcd.print(result);
+lcd.setCursor(0,1);
+lcd.print("Please Wait....");
+delay(1000);
+attendance(result);
+lcd.clear();
+lcd.print("Attendance ");
+lcd.setCursor(0,1);
+lcd.print("Registered");
+delay(1000);
+digitalWrite(indFinger, HIGH);
+return;
+}
+checkKeys();
+delay(200);
+}
+
+// dmyyhms - 7 bytes
+void attendance(int id)
+{
+Serial.print("User id:");
+Serial.print(id);
+Serial.print(",");
+ String time1=String();
+  time1+=now.hour();
+  time1+=":";
+  time1+=now.minute();
+  time1+=":";
+  time1+=now.second();
+  time1+=",";
+  time1+=now.day();
+  time1+="/";
+  time1+=now.month();
+  time1+="/";
+  time1+=now.year();
+Serial.println(time1);
+}
+
+void checkKeys()
+{
+if(digitalRead(register_back) == 0)
+{
+lcd.clear();
+lcd.print("Please Wait");
+delay(1000);
+while(digitalRead(register_back) == 0);
+Enroll();
+lcd.clear();
+}
+
+else if(digitalRead(delete_ok) == 0)
+{
+lcd.clear();
+lcd.print("Please Wait");
+delay(1000);
+delet();
+lcd.clear();
+}
+}
+
+void Enroll()
+{
+uint16_t count;
+lcd.clear();
+lcd.print("Enter OK/BACK:");
+while(1)
+{
+if(digitalRead(delete_ok) == 0)
+{
+lcd.clear();
+for(count=1;count<=250;count++)
+{ 
+  uint8_t p = finger.loadModel(count);
+if(!(p==FINGERPRINT_OK))
+{ 
+  Serial.println(count);
+  break;
+}
+}
+id=count;
+getFingerprintEnroll();
+lcd.clear();
+return;
+}
+else if(digitalRead(register_back) == 0)
+{
+return;
+}
+}
+}
+
+void delet()
+{
+int count=1;
+lcd.clear();
+lcd.print("Enter Finger ID");
+
+while(1)
+{
+lcd.setCursor(0,1);
+lcd.print(count);
+if(digitalRead(forward) == 0)
+{
+lcd.clear();
+lcd.print("Enter Finger ID");
+count++;
+if(count>records)
+count=1;
+delay(500);
+}
+
+else if(digitalRead(reverse) == 0)
+{
+lcd.clear();
+lcd.print("Enter Finger ID");
+count--;
+if(count<1)
+count=records;
+delay(500);
+}
+else if(digitalRead(delete_ok) == 0)
+{
+lcd.clear();
+lcd.print("Enter Finger ID");
+id=count;
+deleteFingerprint(id);
+return;
+}
+
+else if(digitalRead(register_back) == 0)
+{
+return;
+}
+}
+}
+
+uint8_t getFingerprintEnroll()
+{
+int p = -1;
+lcd.clear();
+lcd.print("ID:");
+lcd.print(id);
+lcd.setCursor(0,1);
+lcd.print("Place Finger");
+delay(2000);
+while (p != FINGERPRINT_OK)
+{
+p = finger.getImage();
+switch (p)
+{
+case FINGERPRINT_OK:
+//Serial.println("Image taken,");
+lcd.clear();
+lcd.print("Image taken");
+break;
+case FINGERPRINT_NOFINGER:
+//Serial.println("No Finger");
+lcd.clear();
+lcd.print("No Finger Found");
+break;
+case FINGERPRINT_PACKETRECIEVEERR:
+Serial.println("Communication error,");
+lcd.clear();
+lcd.print("Comm Error");
+break;
+case FINGERPRINT_IMAGEFAIL:
+Serial.println("Imaging error,");
+lcd.clear();
+lcd.print("Imaging Error");
+break;
+default:
+Serial.println("Unknown error,");
+lcd.clear();
+lcd.print("Unknown Error");
+break;
+}
+}
+
+// OK success!
+
+p = finger.image2Tz(1);
+switch (p) {
+case FINGERPRINT_OK:
+Serial.println("Image converted,");
+lcd.clear();
+lcd.print("Image converted");
+break;
+case FINGERPRINT_IMAGEMESS:
+Serial.println("Image too messy,");
+lcd.clear();
+lcd.print("Image too messy");
+return p;
+case FINGERPRINT_PACKETRECIEVEERR:
+Serial.println("Communication error,");
+lcd.clear();
+lcd.print("Comm Error");
+return p;
+case FINGERPRINT_FEATUREFAIL:
+Serial.println("Could not find fingerprint features,");
+lcd.clear();
+lcd.print("Feature Not Found");
+return p;
+case FINGERPRINT_INVALIDIMAGE:
+Serial.println("Could not find fingerprint features,");
+lcd.clear();
+lcd.print("Feature Not Found");
+return p;
+default:
+Serial.println("Unknown error,");
+lcd.clear();
+lcd.print("Unknown Error");
+return p;
+}
+//Serial.println("Remove finger");
+lcd.clear();
+lcd.print("Remove Finger");
+delay(2000);
+p = 0;
+while (p != FINGERPRINT_NOFINGER) {
+p = finger.getImage();
+}
+Serial.print("ID "); 
+Serial.println(id);
+p = -1;
+//Serial.println("Place same finger again");
+lcd.clear();
+lcd.print("Place Finger");
+lcd.setCursor(0,1);
+lcd.print(" Again");
+while (p != FINGERPRINT_OK) {
+p = finger.getImage();
+switch (p) {
+case FINGERPRINT_OK:
+Serial.println("Image taken,");
+break;
+case FINGERPRINT_NOFINGER:
+//Serial.print(".");
+break;
+case FINGERPRINT_PACKETRECIEVEERR:
+Serial.println("Communication error,");
+break;
+case FINGERPRINT_IMAGEFAIL:
+Serial.println("Imaging error,");
+break;
+default:
+Serial.println("Unknown error,");
+return;
+}
+}
+
+// OK success!
+p = finger.image2Tz(2);
+switch (p) {
+case FINGERPRINT_OK:
+Serial.println("Image converted,");
+break;
+case FINGERPRINT_IMAGEMESS:
+Serial.println("Image too messy,");
+return p;
+case FINGERPRINT_PACKETRECIEVEERR:
+Serial.println("Communication error,");
+return p;
+case FINGERPRINT_FEATUREFAIL:
+Serial.println("Could not find fingerprint features,");
+return p;
+case FINGERPRINT_INVALIDIMAGE:
+Serial.println("Could not find fingerprint features,");
+return p;
+default:
+Serial.println("Unknown error,");
+return p;
+}
+
+// OK converted!
+Serial.print("Creating model for #");
+Serial.print(id);
+Serial.println(",");
+p = finger.createModel();
+if (p == FINGERPRINT_OK) {
+Serial.println("Prints matched!,");
+} 
+else if (p == FINGERPRINT_PACKETRECIEVEERR) {
+Serial.println("Communication error,");
+return p;
+}
+else if (p == FINGERPRINT_ENROLLMISMATCH) {
+Serial.println("Fingerprints did not match,");
+lcd.clear();
+lcd.print("Failed!");
+delay(1000);
+return p;
+}
+else {
+Serial.println("Unknown error,");
+return p;
+}
+Serial.print("ID: "); 
+Serial.print(id);
+p = finger.storeModel(id);
+if (p == FINGERPRINT_OK) {
+String time1=String();
+  time1+=now.hour();
+  time1+=":";
+  time1+=now.minute();
+  time1+=":";
+  time1+=now.second();
+  time1+=",";
+  time1+=now.day();
+  time1+="/";
+  time1+=now.month();
+  time1+="/";
+  time1+=now.year();
+Serial.print(" Successfully registered at: ");
+Serial.println(time1);
+lcd.clear();
+lcd.print("Id:");
+lcd.print(id);
+lcd.setCursor(0,1);
+lcd.print("Stored");
+delay(2000);
+lcd.clear();
+}
+else if (p == FINGERPRINT_PACKETRECIEVEERR) {
+Serial.println("Communication error,");
+return p;
+}
+else if (p == FINGERPRINT_BADLOCATION) {
+Serial.println("Could not store in that location,");
+return p;
+}
+else if (p == FINGERPRINT_FLASHERR) {
+Serial.println("Error writing to flash,");
+return p;
+}
+else 
+{
+Serial.println("Unknown error,");
+return p;
+}
+}
+
+int getFingerprintIDez()
+{
+uint8_t p = finger.getImage();
+
+if (p != FINGERPRINT_OK)
+return -1;
+
+p = finger.image2Tz();
+if (p != FINGERPRINT_OK)
+return -1;
+
+p = finger.fingerFastSearch();
+if (p != FINGERPRINT_OK)
+{
+lcd.clear();
+lcd.print("Finger Not Found");
+lcd.setCursor(0,1);
+lcd.print("Try Later");
+delay(2000);
+lcd.clear();
+return -1;
+}
+lcd.clear();
+return finger.fingerID;
+}
+
+uint8_t deleteFingerprint(uint8_t id)
+{
+uint8_t p = -1;
+lcd.clear();
+lcd.print("Please wait");
+p = finger.deleteModel(id);
+if (p == FINGERPRINT_OK)
+{
+Serial.print("ID:");
+Serial.print(id);
+String time1=String();
+  time1+=now.hour();
+  time1+=":";
+  time1+=now.minute();
+  time1+=":";
+  time1+=now.second();
+  time1+=",";
+  time1+=now.day();
+  time1+="/";
+  time1+=now.month();
+  time1+="/";
+  time1+=now.year();
+Serial.print("Successfully Deleted at:");
+Serial.println(time1);
+lcd.clear();
+lcd.print("Finger Deleted");
+lcd.setCursor(0,1);
+lcd.print("Successfully");
+delay(1000);
+lcd.clear();
+}
+else
+{
+Serial.print("Something Wrong,");
+lcd.clear();
+lcd.print("Something Wrong");
+lcd.setCursor(0,1);
+lcd.print("Try Again Later");
+delay(2000);
+lcd.clear();
+return p;
+}
+}
